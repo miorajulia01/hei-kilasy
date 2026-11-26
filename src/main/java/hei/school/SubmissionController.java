@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +31,21 @@ public class SubmissionController {
 
     @Autowired
     private JavaMailSender mailSender;
+
+    @Autowired
+    private SmsSender smsSender;
+
+    interface SmsSender {
+        void send(String phone, String text);
+    }
+
+    @Component
+    static class ConsoleSmsSender implements SmsSender {
+        @Override
+        public void send(String phone, String text) {
+            System.out.println("[SMS] " + phone + " : " + text);
+        }
+    }
 
     @PostMapping("/exercises/{id}/submissions")
     public ResponseEntity<?> submit(@PathVariable long id, @RequestBody Map<String, Object> body) {
@@ -138,7 +155,7 @@ public class SubmissionController {
         // grade out of 20, with late penalty
         double grade = penalizedGrade(points, max, deadline, submittedAt);
 
-        // notify the student by email
+        // notify the student by email; a failure must not block the SMS or the response
         String fullName = (String) row.get("full_name");
         String firstName = fullName.split(" ")[0];
         String title = (String) row.get("title");
@@ -153,8 +170,24 @@ public class SubmissionController {
         }
         text += "\nL'équipe Kilasy";
         message.setText(text);
-        mailSender.send(message);
-        System.out.println("Email de note envoyé à " + row.get("email"));
+        try {
+            mailSender.send(message);
+            System.out.println("Email de note envoyé à " + row.get("email"));
+        } catch (Exception e) {
+            System.out.println("[EMAIL] échec d'envoi à " + row.get("email") + " : " + e.getMessage());
+        }
+
+        // notify the student by SMS; a failure must not block the publication
+        String phone = (String) row.get("phone");
+        if (phone != null && !phone.isBlank()) {
+            try {
+                String smsText = "Votre note pour « " + title + " » est disponible : "
+                        + String.format(Locale.FRANCE, "%.1f", grade) + "/20.";
+                smsSender.send(phone, smsText);
+            } catch (Exception e) {
+                System.out.println("[SMS] échec d'envoi au " + phone + " : " + e.getMessage());
+            }
+        }
 
         Map<String, Object> result = new HashMap<>();
         result.put("id", id);
