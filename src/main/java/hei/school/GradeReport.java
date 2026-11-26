@@ -6,6 +6,7 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,11 +64,11 @@ public class GradeReport {
                 } else {
                     BigDecimal raw = (BigDecimal) row.get("raw_points");
                     BigDecimal max = (BigDecimal) row.get("max_points");
-                    BigDecimal grade = raw.multiply(new BigDecimal("20")).divide(max, 1, RoundingMode.HALF_UP);
+                    double grade = penalizedGrade(raw.doubleValue(), max.doubleValue(), deadline, submittedAt);
                     line.put("status", "CORRIGÉ");
                     line.put("grade", grade);
                     line.put("feedback", row.get("feedback"));
-                    total = total.add(grade);
+                    total = total.add(BigDecimal.valueOf(grade));
                     graded++;
                 }
             }
@@ -82,5 +83,15 @@ public class GradeReport {
         report.put("exercises", lines);
         report.put("average", graded == 0 ? null : total.divide(new BigDecimal(graded), 2, RoundingMode.HALF_UP));
         return report;
+    }
+
+    private static double penalizedGrade(double raw, double max, LocalDate deadline, LocalDateTime submittedAt) {
+        if (max <= 0) {
+            return 0;
+        }
+        double base = raw / max * 20;
+        long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+        double penalty = Math.min(daysLate * 0.10, 0.50);
+        return Math.max(0, Math.round(base * (1 - penalty) * 10) / 10.0);
     }
 }

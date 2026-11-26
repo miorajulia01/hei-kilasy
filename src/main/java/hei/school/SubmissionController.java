@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,7 +100,7 @@ public class SubmissionController {
             double raw = ((BigDecimal) row.get("raw_points")).doubleValue();
             double max = ((BigDecimal) row.get("max_points")).doubleValue();
             result.put("rawPoints", raw);
-            result.put("grade", Math.round(raw / max * 20 * 10) / 10.0);
+            result.put("grade", penalizedGrade(raw, max, deadline, submittedAt));
             result.put("feedback", row.get("feedback"));
         }
         return ResponseEntity.ok(result);
@@ -130,12 +131,12 @@ public class SubmissionController {
         jdbcTemplate.update("UPDATE submission SET raw_points = ?, feedback = ?, graded_at = now() WHERE id = ?",
                 points, feedback, id);
 
-        // grade out of 20
-        double grade = Math.round(points / max * 20 * 10) / 10.0;
-
         LocalDate deadline = ((java.sql.Date) row.get("deadline")).toLocalDate();
         LocalDateTime submittedAt = ((Timestamp) row.get("submitted_at")).toLocalDateTime();
         boolean late = submittedAt.toLocalDate().isAfter(deadline);
+
+        // grade out of 20, with late penalty
+        double grade = penalizedGrade(points, max, deadline, submittedAt);
 
         // notify the student by email
         String fullName = (String) row.get("full_name");
@@ -163,5 +164,15 @@ public class SubmissionController {
         result.put("late", late);
         result.put("feedback", feedback);
         return ResponseEntity.ok(result);
+    }
+
+    private static double penalizedGrade(double raw, double max, LocalDate deadline, LocalDateTime submittedAt) {
+        if (max <= 0) {
+            return 0;
+        }
+        double base = raw / max * 20;
+        long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+        double penalty = Math.min(daysLate * 0.10, 0.50);
+        return Math.max(0, Math.round(base * (1 - penalty) * 10) / 10.0);
     }
 }

@@ -1,6 +1,10 @@
 package hei.school;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 
@@ -32,9 +36,12 @@ public class CsvExport {
         for (Map<String, Object> row : rows) {
             String note = "";
             if (row.get("raw_points") != null) {
-                double n = ((BigDecimal) row.get("raw_points")).doubleValue()
-                        / ((BigDecimal) row.get("max_points")).doubleValue() * 20;
-                n = Math.floor(n * 10) / 10;
+                LocalDate deadline = ((java.sql.Date) row.get("deadline")).toLocalDate();
+                LocalDateTime submittedAt = ((Timestamp) row.get("submitted_at")).toLocalDateTime();
+                double n = penalizedGrade(
+                        ((BigDecimal) row.get("raw_points")).doubleValue(),
+                        ((BigDecimal) row.get("max_points")).doubleValue(),
+                        deadline, submittedAt);
                 note = String.valueOf(n).replace('.', ',');
             }
             csv.append(row.get("reference")).append(';')
@@ -52,5 +59,15 @@ public class CsvExport {
                 .header("Content-Type", "text/csv; charset=UTF-8")
                 .header("Content-Disposition", "attachment; filename=\"notes-kilasy.csv\"")
                 .body(csv.toString());
+    }
+
+    private static double penalizedGrade(double raw, double max, LocalDate deadline, LocalDateTime submittedAt) {
+        if (max <= 0) {
+            return 0;
+        }
+        double base = raw / max * 20;
+        long daysLate = Math.max(0, ChronoUnit.DAYS.between(deadline, submittedAt.toLocalDate()));
+        double penalty = Math.min(daysLate * 0.10, 0.50);
+        return Math.max(0, Math.round(base * (1 - penalty) * 10) / 10.0);
     }
 }
